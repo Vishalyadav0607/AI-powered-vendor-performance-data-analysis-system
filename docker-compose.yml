@@ -1,0 +1,143 @@
+# =============================================================================
+# docker-compose.yml — AI-Powered Vendor Performance Analytics System
+# Phase 10C Production Configuration
+#
+# Usage:
+#   docker compose up --build -d
+#
+# Environment:
+#   All secrets are read from the project-root .env file.
+#   NEVER hard-code credentials here. See .env.example for required variables.
+#
+# Services:
+#   db        — PostgreSQL 15 (internal only, NOT published to host)
+#   backend   — FastAPI / uvicorn (port 8000 published for direct API access)
+#   frontend  — nginx serving React SPA + reverse proxy to backend (port 80)
+#
+# Networks:
+#   appnet    — isolated bridge network; db is NOT reachable from outside
+#
+# Volumes:
+#   postgres_data — PostgreSQL data directory
+#   rag_data      — Backend data/ directory (SQLite / RAG vector store)
+#   reports       — Backend reports/ directory (generated file reports)
+# =============================================================================
+
+version: "3.9"
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+networks:
+  appnet:
+    driver: bridge
+
+# ---------------------------------------------------------------------------
+# Named Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    name: vendor_perf_postgres_data
+  rag_data:
+    name: vendor_perf_rag_data
+  reports:
+    name: vendor_perf_reports
+
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+services:
+
+  # ── PostgreSQL database ────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - appnet
+    # PostgreSQL is NOT exposed to the host (no ports: block).
+    # Only backend can reach it via the appnet Docker network.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── FastAPI backend ────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: .           # Build context = repo root
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env               # Real credentials from local .env (never committed)
+    environment:
+      # Override only the values that differ in Docker (DATABASE_URL, CORS)
+      DATABASE_URL: >-
+        postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ENVIRONMENT: production
+      CORS_ORIGINS: >-
+        http://localhost,http://localhost:80,http://127.0.0.1,http://127.0.0.1:80
+    volumes:
+      # Persist SQLite/RAG data directory and reports directory
+      - rag_data:/app/backend/data
+      - reports:/app/backend/reports
+      # ML artifacts are baked into the image (COPY ml/ in Dockerfile)
+    ports:
+      - "8000:8000"        # Optional: expose backend directly for debugging
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - appnet
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request, sys; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=5); sys.exit(0)"
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ── nginx + React frontend ─────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .           # Build context = repo root
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"            # Host port 80 → container port 80
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - appnet
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:80/healthz"]
+      interval: 20s
+      timeout: 8s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

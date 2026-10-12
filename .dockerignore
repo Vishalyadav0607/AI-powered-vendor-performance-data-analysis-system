@@ -1,0 +1,50 @@
+# Root .dockerignore — applies when build context is the repository root
+# Excludes files that should never be copied into Docker images
+
+# ── Version control ──────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Secrets & local config ────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python artifacts ──────────────────────────────────────────────────────────
+backend/venv/
+backend/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── SQLite / local databases ──────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Node artifacts ────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── IDE & OS artifacts ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo
+
+# ── Docker files (avoid recursive copy) ──────────────────────────────────────
+docker-compose*.yml
+docker-compose*.yaml
+.dockerignore
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+tests/
+**/.pytest_cache/
